@@ -40,6 +40,71 @@ function ago(iso) {
 
 const authorName = (id) => state.membersById.get(id)?.username ?? "someone";
 
+/**
+ * A titled post is a thread; an untitled one is a reply. That single rule gives
+ * sub-threads: a titled post hanging off another thread, with its own page and its
+ * own replies, so a busy thread can become a router to the threads underneath it.
+ */
+const isThread = (post) => Boolean(post.title_ct);
+
+/** Arranges a room's posts into the tree the pages read from. */
+function buildTree(posts) {
+  const byId = new Map(posts.map((post) => [post.id, post]));
+  const children = new Map();
+  for (const post of posts) {
+    const list = children.get(post.parent_id) ?? [];
+    list.push(post);
+    children.set(post.parent_id, list);
+  }
+
+  const kidsOf = (id) => children.get(id) ?? [];
+
+  /** Sub-threads and replies of one post, told apart by whether they carry a title. */
+  const split = (id) => {
+    const kids = kidsOf(id);
+    return { subThreads: kids.filter(isThread), replies: kids.filter((k) => !isThread(k)) };
+  };
+
+  /**
+   * Replies belonging to a thread: its untitled descendants, stopping wherever a
+   * sub-thread starts, because those are counted and shown on their own page.
+   */
+  const replyCount = (id) => {
+    let total = 0;
+    for (const kid of kidsOf(id)) {
+      if (isThread(kid)) continue;
+      total += 1 + replyCount(kid.id);
+    }
+    return total;
+  };
+
+  return {
+    byId,
+    roots: posts.filter((post) => post.parent_id === null),
+    kidsOf,
+    split,
+    counts: (id) => ({ subThreads: split(id).subThreads.length, replies: replyCount(id) }),
+    /** Walks up to the top of the tree, for the trail shown above a sub-thread. */
+    ancestors(id) {
+      const trail = [];
+      let post = byId.get(id);
+      while (post?.parent_id) {
+        post = byId.get(post.parent_id);
+        if (!post) break;
+        if (isThread(post)) trail.unshift(post);
+      }
+      return trail;
+    },
+  };
+}
+
+function describeCounts({ subThreads, replies }) {
+  const parts = [];
+  if (subThreads) parts.push(`${subThreads} sub-thread${subThreads === 1 ? "" : "s"}`);
+  parts.push(`${replies} repl${replies === 1 ? "y" : "ies"}`);
+  return parts.join(" · ");
+}
+
 function notice(message, kind = "info") {
   const bar = $("#notice");
   bar.textContent = message;
@@ -224,30 +289,24 @@ async function renderRoom(slug) {
 
   busy(true);
   try {
-    const threads = await db.threads(room.id);
+    const tree = buildTree(await db.roomPosts(room.id));
+    const threads = tree.roots.slice().reverse(); // newest first
     const ids = threads.map((t) => t.id);
-    const [scores, votes, kids] = await Promise.all([db.scores(ids), db.myVotes(ids), db.descendants(room.id)]);
+    const [scores, votes] = await Promise.all([db.scores(ids), db.myVotes(ids)]);
     const scoreBy = new Map(scores.map((s) => [s.post_id, s.score]));
     const voteBy = new Map(votes.map((v) => [v.post_id, v.value]));
-    const replyCount = new Map();
-    for (const row of kids) {
-      let root = row.parent_id;
-      // Replies nest, so walk up to the thread they belong to.
-      const parents = new Map(kids.map((k) => [k.id, k.parent_id]));
-      while (root && parents.get(root)) root = parents.get(root);
-      if (root) replyCount.set(root, (replyCount.get(root) ?? 0) + 1);
-    }
 
     const list = el("ol", { className: "threads" });
     for (const thread of threads) {
       const title = (await decryptText(key, thread.title_ct)) ?? "[cannot decrypt]";
+      const counts = tree.counts(thread.id);
       list.append(el("li", { className: "thread" },
         voteBox(thread.id, scoreBy.get(thread.id) ?? 0, voteBy.get(thread.id) ?? 0),
         el("div", { className: "thread-main" },
           el("a", { href: `#/r/${room.slug}/t/${thread.id}`, className: "thread-title" }, title),
           el("div", { className: "meta" },
             `by @${authorName(thread.author_id)} · ${ago(thread.created_at)} · `,
-            el("a", { href: `#/r/${room.slug}/t/${thread.id}` }, `${replyCount.get(thread.id) ?? 0} replies`)),
+            el("a", { href: `#/r/${room.slug}/t/${thread.id}` }, describeCounts(counts))),
         )));
     }
 
@@ -349,11 +408,20 @@ function voteBox(postId, score, mine) {
   return el("div", { className: "votes" }, up, label, down);
 }
 
-function composer(room, parentId, buttonLabel) {
+/**
+ * One form for all three kinds of writing. A title means a thread — top level when
+ * there is no parent, a sub-thread when there is. No title means a reply.
+ */
+function composer(room, parentId, buttonLabel, { withTitle = !parentId } = {}) {
   const key = session.roomKey(room);
   const form = el("form", { className: "composer" },
-    parentId ? null : el("input", { name: "title", placeholder: "Title", required: true, maxLength: 200 }),
-    el("textarea", { name: "body", placeholder: parentId ? "Reply…" : "Say something…", required: true, rows: parentId ? 3 : 4 }),
+    withTitle ? el("input", { name: "title", placeholder: "Title", required: true, maxLength: 200 }) : null,
+    el("textarea", {
+      name: "body",
+      placeholder: withTitle ? "Say something…" : "Reply…",
+      required: true,
+      rows: withTitle ? 4 : 3,
+    }),
     el("button", { type: "submit", className: "primary" }, buttonLabel),
   );
 
@@ -368,7 +436,8 @@ function composer(room, parentId, buttonLabel) {
         author_id: auth.userId,
         epoch: room.epoch,
         body_ct: await encryptText(key, data.get("body")),
-        title_ct: parentId ? null : await encryptText(key, data.get("title")),
+        // A title is what makes this a thread rather than a reply, parent or not.
+        title_ct: withTitle ? await encryptText(key, data.get("title")) : null,
       };
       await db.createPost(post);
       form.reset();
@@ -392,8 +461,9 @@ async function renderThread(slug, threadId) {
 
   busy(true);
   try {
-    const rows = await db.replies(threadId);
-    const root = rows.find((r) => r.id === threadId);
+    const rows = await db.roomPosts(room.id);
+    const tree = buildTree(rows);
+    const root = tree.byId.get(threadId);
     if (!root) return renderRoom(slug);
 
     const ids = rows.map((r) => r.id);
@@ -401,16 +471,8 @@ async function renderThread(slug, threadId) {
     const scoreBy = new Map(scores.map((s) => [s.post_id, s.score]));
     const voteBy = new Map(votes.map((v) => [v.post_id, v.value]));
 
-    const byParent = new Map();
-    for (const row of rows) {
-      if (row.id === threadId) continue;
-      const list = byParent.get(row.parent_id) ?? [];
-      list.push(row);
-      byParent.set(row.parent_id, list);
-    }
-
     const renderReplies = async (parentId, depth) => {
-      const children = byParent.get(parentId) ?? [];
+      const children = tree.split(parentId).replies;
       const list = el("ul", { className: `replies depth-${Math.min(depth, 6)}` });
       for (const child of children) {
         const body = (await decryptText(key, child.body_ct)) ?? "[cannot decrypt]";
@@ -430,8 +492,15 @@ async function renderThread(slug, threadId) {
     const title = (await decryptText(key, root.title_ct)) ?? "[cannot decrypt]";
     const body = (await decryptText(key, root.body_ct)) ?? "[cannot decrypt]";
 
+    // The trail back up: room, then each thread this one hangs under.
+    const trail = el("nav", { className: "back" }, el("a", { href: `#/r/${room.slug}` }, `← ${room.name}`));
+    for (const parent of tree.ancestors(root.id)) {
+      const parentTitle = (await decryptText(key, parent.title_ct)) ?? "[cannot decrypt]";
+      trail.append(" / ", el("a", { href: `#/r/${room.slug}/t/${parent.id}` }, parentTitle));
+    }
+
     view.replaceChildren(
-      el("a", { href: `#/r/${room.slug}`, className: "back" }, `← ${room.name}`),
+      trail,
       el("article", { className: "thread-view" },
         voteBox(root.id, scoreBy.get(root.id) ?? 0, voteBy.get(root.id) ?? 0),
         el("div", { className: "thread-main" },
@@ -439,6 +508,7 @@ async function renderThread(slug, threadId) {
           el("div", { className: "meta" }, `by @${authorName(root.author_id)} · ${ago(root.created_at)}`),
           el("div", { className: "body" }, body),
         )),
+      await renderSubThreads(room, tree, root, key, scoreBy, voteBy),
       composer(room, root.id, "Reply"),
       await renderReplies(root.id, 0),
     );
@@ -447,6 +517,39 @@ async function renderThread(slug, threadId) {
   } finally {
     busy(false);
   }
+}
+
+/**
+ * The router half of a thread page: the sub-threads hanging off it, and the way to
+ * start another. Empty until somebody makes one, so an ordinary thread stays plain.
+ */
+async function renderSubThreads(room, tree, root, key, scoreBy, voteBy) {
+  const section = el("section", { className: "sub-threads" });
+  const children = tree.split(root.id).subThreads;
+
+  if (children.length) {
+    const list = el("ol", { className: "threads" });
+    for (const child of children) {
+      const title = (await decryptText(key, child.title_ct)) ?? "[cannot decrypt]";
+      list.append(el("li", { className: "thread" },
+        voteBox(child.id, scoreBy.get(child.id) ?? 0, voteBy.get(child.id) ?? 0),
+        el("div", { className: "thread-main" },
+          el("a", { href: `#/r/${room.slug}/t/${child.id}`, className: "thread-title" }, title),
+          el("div", { className: "meta" },
+            `by @${authorName(child.author_id)} · ${ago(child.created_at)} · ${describeCounts(tree.counts(child.id))}`),
+        )));
+    }
+    section.append(el("h2", {}, `Sub-threads (${children.length})`), list);
+  }
+
+  const slot = el("div", { className: "reply-slot" });
+  const toggle = el("button", { className: "linkish" }, "+ new sub-thread");
+  toggle.onclick = () => {
+    if (slot.firstChild) return slot.replaceChildren();
+    slot.replaceChildren(composer(room, root.id, "Create sub-thread", { withTitle: true }));
+  };
+  section.append(el("div", { className: "sub-thread-tools" }, toggle, slot));
+  return section;
 }
 
 function replyToggle(room, parentId) {

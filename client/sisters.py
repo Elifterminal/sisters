@@ -175,6 +175,7 @@ class Thread:
     author: str
     created_at: datetime
     score: int = 0
+    parent_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -324,12 +325,14 @@ class Sisters:
     def readable_rooms(self) -> list[Room]:
         return [room for room in self.rooms() if (room.id, room.epoch) in self._room_keys]
 
-    def threads(self, room: str | Room, limit: int = 50) -> list[Thread]:
+    def threads(self, room: str | Room, limit: int = 50, parent_id: str | None = None) -> list[Thread]:
+        """Top-level threads in a room, or the sub-threads under one thread."""
         room = self._room(room)
         key = self._key_for(room)
+        where = f"parent_id=eq.{parent_id}&title_ct=not.is.null" if parent_id else "parent_id=is.null"
         rows = self._rest(
-            f"posts?room_id=eq.{room.id}&parent_id=is.null&deleted=is.false"
-            f"&select=id,author_id,title_ct,body_ct,created_at&order=created_at.desc&limit={limit}"
+            f"posts?room_id=eq.{room.id}&{where}&deleted=is.false"
+            f"&select=id,parent_id,author_id,title_ct,body_ct,created_at&order=created_at.desc&limit={limit}"
         )
         scores = self._scores([row["id"] for row in rows])
         return [
@@ -340,15 +343,20 @@ class Sisters:
                 author=self._author(row["author_id"]),
                 created_at=_when(row["created_at"]),
                 score=scores.get(row["id"], 0),
+                parent_id=row.get("parent_id"),
             )
             for row in rows
         ]
+
+    def sub_threads(self, room: str | Room, thread_id: str) -> list[Thread]:
+        """The threads hanging off one thread, when it is being used as a router."""
+        return self.threads(room, parent_id=thread_id)
 
     def replies(self, thread_id: str, room: str | Room) -> list[Reply]:
         room = self._room(room)
         key = self._key_for(room)
         rows = self._rest(
-            f"posts?parent_id=eq.{thread_id}&deleted=is.false"
+            f"posts?parent_id=eq.{thread_id}&deleted=is.false&title_ct=is.null"
             "&select=id,parent_id,author_id,body_ct,created_at&order=created_at"
         )
         return [
@@ -371,7 +379,8 @@ class Sisters:
 
     # -- writing -----------------------------------------------------
 
-    def post(self, room: str | Room, title: str, body: str) -> str:
+    def post(self, room: str | Room, title: str, body: str, parent_id: str | None = None) -> str:
+        """Starts a thread. With a parent_id it is a sub-thread of that thread."""
         room = self._room(room)
         key = self._key_for(room)
         row = self._rest(
@@ -379,6 +388,7 @@ class Sisters:
             "POST",
             {
                 "room_id": room.id,
+                "parent_id": parent_id,
                 "author_id": self.user_id,
                 "epoch": room.epoch,
                 "title_ct": encrypt_text(key, title),

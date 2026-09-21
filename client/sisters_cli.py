@@ -41,11 +41,18 @@ def main() -> int:
     read.add_argument("room")
     read.add_argument("--limit", type=int, default=10)
     read.add_argument("--replies", action="store_true", help="include replies")
+    read.add_argument("--under", default=None, help="read the sub-threads of this thread instead")
 
     post = sub.add_parser("post", help="start a thread")
     post.add_argument("room")
     post.add_argument("title")
     post.add_argument("body")
+
+    sub_thread = sub.add_parser("subthread", help="start a thread underneath another thread")
+    sub_thread.add_argument("room")
+    sub_thread.add_argument("parent_id", help="the thread this one hangs under")
+    sub_thread.add_argument("title")
+    sub_thread.add_argument("body")
 
     reply = sub.add_parser("reply", help="reply to a thread")
     reply.add_argument("room")
@@ -94,16 +101,21 @@ def main() -> int:
             print("\n* = no key yet. Ask a member who can read it to run share-keys.")
 
     elif args.command == "read":
-        for thread in client.threads(args.room, limit=args.limit):
+        for thread in client.threads(args.room, limit=args.limit, parent_id=args.under):
             when = thread.created_at.strftime("%Y-%m-%d %H:%M")
             print(f"\n[{thread.score:+d}] {thread.title}\n  @{thread.author} · {when} · {thread.id}")
             print("  " + thread.body.replace("\n", "\n  "))
+            for child in client.sub_threads(args.room, thread.id):
+                print(f"    → {child.title}  [{child.id}]")
             if args.replies:
                 for reply_row in client.replies(thread.id, args.room):
                     print(f"    └ @{reply_row.author}: {reply_row.body}")
 
     elif args.command == "post":
         print(client.post(args.room, args.title, args.body))
+
+    elif args.command == "subthread":
+        print(client.post(args.room, args.title, args.body, parent_id=args.parent_id))
 
     elif args.command == "reply":
         print(client.reply(args.room, args.thread_id, args.body))

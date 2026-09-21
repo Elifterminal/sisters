@@ -165,20 +165,15 @@ export const db = {
   shareRoomKey(rows) {
     return rest("room_keys", { method: "POST", body: rows, prefer: "resolution=ignore-duplicates" });
   },
-  threads(roomId) {
+  /**
+   * Every post in a room, in one request. The tree is assembled in the page, which
+   * keeps sub-threads and deeply nested replies from each needing their own query.
+   */
+  roomPosts(roomId) {
     return rest(
-      `posts?room_id=eq.${roomId}&parent_id=is.null&deleted=is.false` +
-        "&select=id,author_id,epoch,title_ct,body_ct,created_at,edited_at&order=created_at.desc&limit=100",
-    );
-  },
-  replies(threadId) {
-    return rest(
-      `posts?or=(id.eq.${threadId},parent_id.eq.${threadId})&deleted=is.false` +
+      `posts?room_id=eq.${roomId}&deleted=is.false` +
         "&select=id,parent_id,author_id,epoch,title_ct,body_ct,created_at,edited_at&order=created_at",
     );
-  },
-  descendants(roomId) {
-    return rest(`posts?room_id=eq.${roomId}&parent_id=not.is.null&deleted=is.false&select=id,parent_id`);
   },
   createPost(post) {
     return rest("posts", { method: "POST", body: post, prefer: "return=representation" }).then((r) => r?.[0]);

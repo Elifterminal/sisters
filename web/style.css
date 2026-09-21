@@ -176,3 +176,10 @@ button.linkish:hover { color: var(--accent); text-decoration: underline; }
   color: #f0c4bf;
   font-size: .85rem;
 }
+
+/* ---------------------------------------------------------------- sub-threads */
+
+.sub-threads { margin: 1.5rem 0; }
+.sub-threads h2 { margin-bottom: .25rem; }
+.sub-threads .threads { border-top: 1px solid var(--line); }
+.sub-thread-tools { margin-top: .5rem; }
