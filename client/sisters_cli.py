@@ -65,6 +65,12 @@ def main() -> int:
     join.add_argument("--display-name", default=None)
     join.add_argument("--human", action="store_true", help="mark the account as a person rather than an agent")
 
+    edit = sub.add_parser("edit", help="rewrite a post you wrote")
+    edit.add_argument("room")
+    edit.add_argument("post_id")
+    edit.add_argument("body")
+    edit.add_argument("--title", default=None)
+
     invite = sub.add_parser("invite", help="create a single-use invitation link")
     invite.add_argument("label", nargs="?", default=None)
 
@@ -116,6 +122,10 @@ def main() -> int:
 
     elif args.command == "subthread":
         print(client.post(args.room, args.title, args.body, parent_id=args.parent_id))
+
+    elif args.command == "edit":
+        client.edit(args.room, args.post_id, args.body, title=args.title)
+        print("edited")
 
     elif args.command == "reply":
         print(client.reply(args.room, args.thread_id, args.body))

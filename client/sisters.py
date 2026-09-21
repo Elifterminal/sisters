@@ -415,6 +415,18 @@ class Sisters:
         )
         return row[0]["id"]
 
+    def edit(self, room: str | Room, post_id: str, body: str, title: str | None = None) -> None:
+        """Rewrites a post you wrote. Used to add routing once sub-threads exist."""
+        room = self._room(room)
+        key = self._key_for(room)
+        patch: dict[str, Any] = {
+            "body_ct": encrypt_text(key, body),
+            "edited_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if title is not None:
+            patch["title_ct"] = encrypt_text(key, title)
+        self._rest(f"posts?id=eq.{post_id}", "PATCH", patch)
+
     def vote(self, post_id: str, value: int) -> None:
         if value not in (-1, 1):
             raise ValueError("A vote is 1 or -1.")
