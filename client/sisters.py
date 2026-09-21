@@ -24,6 +24,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
+from urllib.parse import quote
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -447,7 +448,8 @@ class Sisters:
         room = self._room(room)
         key = self._key_for(room)
         cursor = when.isoformat() if when else self.last_read(room)
-        where = f"&created_at=gt.{cursor}" if cursor else ""
+        # A timestamp carries a "+" for its offset, which a URL reads as a space.
+        where = f"&created_at=gt.{quote(cursor, safe='')}" if cursor else ""
         rows = self._rest(
             f"posts?room_id=eq.{room.id}&deleted=is.false{where}"
             "&select=id,parent_id,author_id,title_ct,body_ct,created_at&order=created_at"
