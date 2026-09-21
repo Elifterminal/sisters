@@ -479,8 +479,8 @@ async function renderThread(slug, threadId) {
         const item = el("li", { className: "reply" },
           voteBox(child.id, scoreBy.get(child.id) ?? 0, voteBy.get(child.id) ?? 0),
           el("div", { className: "reply-main" },
-            el("div", { className: "meta" }, `@${authorName(child.author_id)} · ${ago(child.created_at)}`),
-            el("div", { className: "body" }, body),
+            el("div", { className: "meta" }, `@${authorName(child.author_id)} · ${ago(child.created_at)}${editedNote(child)}`),
+            editableBody(room, child, { body }),
             replyToggle(room, child.id),
           ));
         item.append(await renderReplies(child.id, depth + 1));
@@ -505,8 +505,8 @@ async function renderThread(slug, threadId) {
         voteBox(root.id, scoreBy.get(root.id) ?? 0, voteBy.get(root.id) ?? 0),
         el("div", { className: "thread-main" },
           el("h1", {}, title),
-          el("div", { className: "meta" }, `by @${authorName(root.author_id)} · ${ago(root.created_at)}`),
-          el("div", { className: "body" }, body),
+          el("div", { className: "meta" }, `by @${authorName(root.author_id)} · ${ago(root.created_at)}${editedNote(root)}`),
+          editableBody(room, root, { title, body }),
         )),
       await renderSubThreads(room, tree, root, key, scoreBy, voteBy),
       composer(room, root.id, "Reply"),
@@ -550,6 +550,65 @@ async function renderSubThreads(room, tree, root, key, scoreBy, voteBy) {
   };
   section.append(el("div", { className: "sub-thread-tools" }, toggle, slot));
   return section;
+}
+
+/**
+ * The body of a post, with an edit control when it is yours. Editing a router post
+ * is the normal way its routing stays current as sub-threads appear beneath it.
+ */
+function editableBody(room, post, { title, body }) {
+  const wrap = el("div", { className: "post-body" });
+  const text = el("div", { className: "body" }, body);
+  wrap.append(text);
+
+  if (post.author_id !== auth.userId) return wrap;
+
+  const withTitle = Boolean(post.title_ct);
+  const tools = el("div", { className: "post-tools" });
+  const edit = el("button", { className: "linkish" }, "edit");
+
+  edit.onclick = () => {
+    const titleInput = withTitle
+      ? el("input", { name: "title", value: title, required: true, maxLength: 200 })
+      : null;
+    const bodyInput = el("textarea", { name: "body", required: true, rows: Math.min(20, body.split("\n").length + 2) });
+    bodyInput.value = body;
+
+    const form = el("form", { className: "composer" },
+      titleInput,
+      bodyInput,
+      el("div", { className: "edit-actions" },
+        el("button", { type: "submit", className: "primary" }, "Save"),
+        el("button", { type: "button", className: "linkish", onclick: () => route(true) }, "cancel")),
+    );
+
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const key = session.roomKey(room);
+      busy(true);
+      try {
+        const patch = { body_ct: await encryptText(key, bodyInput.value) };
+        if (withTitle) patch.title_ct = await encryptText(key, titleInput.value);
+        await db.updatePost(post.id, patch);
+        route(true);
+      } catch (error) {
+        notice(error.message, "error");
+      } finally {
+        busy(false);
+      }
+    };
+
+    wrap.replaceChildren(form);
+  };
+
+  tools.append(edit);
+  wrap.append(tools);
+  return wrap;
+}
+
+/** "edited 5 minutes ago", when it has been. */
+function editedNote(post) {
+  return post.edited_at ? ` · edited ${ago(post.edited_at)}` : "";
 }
 
 function replyToggle(room, parentId) {

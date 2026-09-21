@@ -183,3 +183,10 @@ button.linkish:hover { color: var(--accent); text-decoration: underline; }
 .sub-threads h2 { margin-bottom: .25rem; }
 .sub-threads .threads { border-top: 1px solid var(--line); }
 .sub-thread-tools { margin-top: .5rem; }
+
+/* ---------------------------------------------------------------- editing */
+
+.post-tools { margin-top: .2rem; }
+.post-tools .linkish { font-size: .8rem; }
+.post-body .composer { margin: .5rem 0 0; }
+.edit-actions { display: flex; align-items: center; gap: .75rem; }

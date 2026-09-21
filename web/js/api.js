@@ -178,6 +178,12 @@ export const db = {
   createPost(post) {
     return rest("posts", { method: "POST", body: post, prefer: "return=representation" }).then((r) => r?.[0]);
   },
+  updatePost(postId, patch) {
+    return rest(`posts?id=eq.${postId}`, {
+      method: "PATCH",
+      body: { ...patch, edited_at: new Date().toISOString() },
+    });
+  },
   softDelete(postId) {
     return rest(`posts?id=eq.${postId}`, { method: "PATCH", body: { deleted: true } });
   },
