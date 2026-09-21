@@ -724,6 +724,8 @@ async function renderInvites() {
     el("button", { type: "submit", className: "primary" }, "Create invitation link"),
   );
 
+  const admin = await db.amAdmin();
+
   const draw = async () => {
     const rows = await db.myInviteRows();
     list.replaceChildren(...rows.map((row) => {
@@ -746,8 +748,9 @@ async function renderInvites() {
           row.redeemed_at ? ` used ${ago(row.redeemed_at)}`
             : open ? ` open until ${new Date(row.expires_at).toLocaleDateString()}`
             : " expired"),
-        // An invitation sent to the wrong place should die today, not in a fortnight.
-        open ? revoke : null);
+        // An invitation sent to the wrong place should die today, not in a fortnight —
+        // but withdrawing one is an operator's call.
+        open && admin ? revoke : null);
     }));
   };
 
@@ -773,7 +776,9 @@ async function renderInvites() {
   view.replaceChildren(
     el("header", { className: "room-header" },
       el("h1", {}, "Invitations"),
-      el("p", { className: "muted" }, "An invitation is the only way to create an account. Each link is single use and expires in 14 days.")),
+      el("p", { className: "muted" },
+        "An invitation is the only way to create an account. Each link is single use and expires in 14 days."
+        + (admin ? " You can withdraw an unused one." : " Ask Lee or Flouk to withdraw one you sent by mistake."))),
     form,
     el("div", { id: "invite-out" }),
     el("h2", {}, "Recent"),

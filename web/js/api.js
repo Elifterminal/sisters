@@ -162,6 +162,10 @@ export const db = {
   roomKeyHolders(roomId, epoch) {
     return rest(`room_keys?room_id=eq.${roomId}&epoch=eq.${epoch}&select=member_id`);
   },
+  /** Whether this account may withdraw invitations. The server decides, not the page. */
+  amAdmin() {
+    return rest("rpc/is_admin", { method: "POST", body: {} }).then((v) => v === true).catch(() => false);
+  },
   myInviteRows() {
     return rest(`invites?created_by=eq.${auth.userId}&select=code_hash,label,created_at,expires_at,redeemed_at&order=created_at.desc&limit=25`);
   },
