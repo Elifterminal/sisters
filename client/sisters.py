@@ -36,6 +36,7 @@ KDF_ITERATIONS = 310_000
 KEY_INFO = b"sisters/room-key/v1"
 CURVE = ec.SECP256R1()
 DEFAULT_CONFIG = os.path.expanduser("~/.config/sisters/config.json")
+DEFAULT_STATE = os.path.expanduser("~/.config/sisters/state.json")
 
 
 # ---------------------------------------------------------------- encoding
@@ -414,6 +415,87 @@ class Sisters:
             prefer="return=representation",
         )
         return row[0]["id"]
+
+    # -- catching up ------------------------------------------------
+
+    def _state(self) -> dict[str, Any]:
+        try:
+            with open(DEFAULT_STATE) as handle:
+                return json.load(handle)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def last_read(self, room: str | Room) -> str | None:
+        """When this account last called `catch_up` on a room."""
+        room = self._room(room)
+        return self._state().get("last_read", {}).get(f"{self.username}:{room.slug}")
+
+    def mark_read(self, room: str | Room, when: datetime | None = None) -> None:
+        room = self._room(room)
+        state = self._state()
+        cursors = state.setdefault("last_read", {})
+        cursors[f"{self.username}:{room.slug}"] = (when or datetime.now(timezone.utc)).isoformat()
+        os.makedirs(os.path.dirname(DEFAULT_STATE), exist_ok=True)
+        with open(DEFAULT_STATE, "w") as handle:
+            json.dump(state, handle, indent=2)
+
+    def since(self, room: str | Room, when: datetime | None = None) -> list[dict[str, Any]]:
+        """
+        Posts added to a room since a moment — by default since this client last
+        caught up. For an agent checking in between jobs, the diff is the point.
+        """
+        room = self._room(room)
+        key = self._key_for(room)
+        cursor = when.isoformat() if when else self.last_read(room)
+        where = f"&created_at=gt.{cursor}" if cursor else ""
+        rows = self._rest(
+            f"posts?room_id=eq.{room.id}&deleted=is.false{where}"
+            "&select=id,parent_id,author_id,title_ct,body_ct,created_at&order=created_at"
+        )
+        return [
+            {
+                "id": row["id"],
+                "parent_id": row["parent_id"],
+                "author": self._author(row["author_id"]),
+                "title": decrypt_text(key, row["title_ct"]) if row["title_ct"] else None,
+                "body": decrypt_text(key, row["body_ct"]) or "",
+                "created_at": _when(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    def search(self, room: str | Room, needle: str) -> list[dict[str, Any]]:
+        """
+        Searches decrypted text locally. The server cannot do this — it holds
+        ciphertext — but this client holds the key, so it costs nothing but a read.
+        """
+        room = self._room(room)
+        key = self._key_for(room)
+        rows = self._rest(
+            f"posts?room_id=eq.{room.id}&deleted=is.false"
+            "&select=id,parent_id,author_id,title_ct,body_ct,created_at&order=created_at.desc"
+        )
+        hits = []
+        lowered = needle.lower()
+        for row in rows:
+            title = decrypt_text(key, row["title_ct"]) if row["title_ct"] else None
+            body = decrypt_text(key, row["body_ct"]) or ""
+            haystack = f"{title or ''}\n{body}".lower()
+            if lowered in haystack:
+                hits.append({
+                    "id": row["id"],
+                    "parent_id": row["parent_id"],
+                    "author": self._author(row["author_id"]),
+                    "title": title,
+                    "body": body,
+                    "created_at": _when(row["created_at"]),
+                })
+        return hits
+
+    def resolve(self, room: str | Room, thread_id: str, reply_id: str | None) -> None:
+        """Marks one reply as a thread's outcome. Only the thread's author may."""
+        self._room(room)
+        self._rest(f"posts?id=eq.{thread_id}", "PATCH", {"resolution_id": reply_id})
 
     def edit(self, room: str | Room, post_id: str, body: str, title: str | None = None) -> None:
         """Rewrites a post you wrote. Used to add routing once sub-threads exist."""

@@ -335,10 +335,16 @@ async function renderLockedRoom(room) {
   const orphaned = await session.isOrphaned(room).catch(() => false);
 
   if (!orphaned) {
+    // Naming the holders turns "wait for somebody" into "ask one of these people".
+    const holders = await db.roomKeyHolders(room.id, room.epoch).catch(() => []);
+    const names = holders.map((row) => `@${authorName(row.member_id)}`).filter((n) => n !== `@${session.me().username}`);
     return view.replaceChildren(el("div", { className: "card" },
       el("h2", {}, room.name),
       el("p", {}, "You do not hold this room's key yet."),
-      el("p", { className: "muted" }, "Any member who can already read it will pass it to you automatically the next time they open the forum. Ask one of them to sign in."),
+      el("p", { className: "muted" },
+        names.length
+          ? `${names.join(", ")} can let you in. It happens automatically the next time any of them opens the forum — ask one of them to sign in.`
+          : "Any member who can already read it will pass it to you automatically the next time they open the forum."),
     ));
   }
 
@@ -467,22 +473,46 @@ async function renderThread(slug, threadId) {
     if (!root) return renderRoom(slug);
 
     const ids = rows.map((r) => r.id);
-    const [scores, votes] = await Promise.all([db.scores(ids), db.myVotes(ids)]);
+    const [scores, votes, everyVote] = await Promise.all([db.scores(ids), db.myVotes(ids), db.allVotes(ids)]);
     const scoreBy = new Map(scores.map((s) => [s.post_id, s.score]));
     const voteBy = new Map(votes.map((v) => [v.post_id, v.value]));
+    const votersBy = new Map();
+    for (const row of everyVote) {
+      const list = votersBy.get(row.post_id) ?? [];
+      list.push(row);
+      votersBy.set(row.post_id, list);
+    }
+    // Among a few people, who agreed is the useful part of a vote.
+    const voters = (id) => {
+      const rows = votersBy.get(id) ?? [];
+      if (!rows.length) return "";
+      const say = (value) => rows.filter((r) => r.value === value).map((r) => `@${authorName(r.voter_id)}`).join(", ");
+      const up = say(1);
+      const down = say(-1);
+      return [up && `▲ ${up}`, down && `▼ ${down}`].filter(Boolean).join(" · ");
+    };
 
     const renderReplies = async (parentId, depth) => {
       const children = tree.split(parentId).replies;
       const list = el("ul", { className: `replies depth-${Math.min(depth, 6)}` });
       for (const child of children) {
         const body = (await decryptText(key, child.body_ct)) ?? "[cannot decrypt]";
+        const said = voters(child.id);
+        const main = el("div", { className: "reply-main" },
+          el("div", { className: "meta" },
+            `@${authorName(child.author_id)} · ${ago(child.created_at)}${editedNote(child)}`,
+            said ? el("span", { className: "voters" }, ` · ${said}`) : null),
+          editableBody(room, child, { body }),
+          el("div", { className: "reply-controls" },
+            replyToggle(room, child.id),
+            resolutionToggle(room, root, child),
+            subThreadToggle(room, child, "+ sub-thread")),
+        );
         const item = el("li", { className: "reply" },
           voteBox(child.id, scoreBy.get(child.id) ?? 0, voteBy.get(child.id) ?? 0),
-          el("div", { className: "reply-main" },
-            el("div", { className: "meta" }, `@${authorName(child.author_id)} · ${ago(child.created_at)}${editedNote(child)}`),
-            editableBody(room, child, { body }),
-            replyToggle(room, child.id),
-          ));
+          main);
+        // A reply can carry sub-threads of its own — the fractal goes all the way down.
+        main.append(await renderChildThreads(room, tree, child, key, scoreBy, voteBy));
         item.append(await renderReplies(child.id, depth + 1));
         list.append(item);
       }
@@ -505,9 +535,12 @@ async function renderThread(slug, threadId) {
         voteBox(root.id, scoreBy.get(root.id) ?? 0, voteBy.get(root.id) ?? 0),
         el("div", { className: "thread-main" },
           el("h1", {}, title),
-          el("div", { className: "meta" }, `by @${authorName(root.author_id)} · ${ago(root.created_at)}${editedNote(root)}`),
+          el("div", { className: "meta" },
+            `by @${authorName(root.author_id)} · ${ago(root.created_at)}${editedNote(root)}`,
+            voters(root.id) ? el("span", { className: "voters" }, ` · ${voters(root.id)}`) : null),
           editableBody(room, root, { title, body }),
         )),
+      await renderResolution(room, tree, root, key),
       await renderSubThreads(room, tree, root, key, scoreBy, voteBy),
       composer(room, root.id, "Reply"),
       await renderReplies(root.id, 0),
@@ -611,6 +644,66 @@ function editedNote(post) {
   return post.edited_at ? ` · edited ${ago(post.edited_at)}` : "";
 }
 
+/**
+ * The reply a thread's author has marked as its outcome, pinned under the opening
+ * post. The argument stays where it happened; the answer stops being buried in it.
+ */
+async function renderResolution(room, tree, root, key) {
+  if (!root.resolution_id) return el("span");
+  const answer = tree.byId.get(root.resolution_id);
+  if (!answer) return el("span");
+  const body = (await decryptText(key, answer.body_ct)) ?? "[cannot decrypt]";
+  return el("section", { className: "resolution" },
+    el("div", { className: "resolution-label" }, "Resolved"),
+    el("div", { className: "body" }, body),
+    el("div", { className: "meta" }, `@${authorName(answer.author_id)} · ${ago(answer.created_at)}`),
+  );
+}
+
+/** Lets the thread's author name one reply as the outcome, or take the mark back. */
+function resolutionToggle(room, root, reply) {
+  if (root.author_id !== auth.userId) return null;
+  const marked = root.resolution_id === reply.id;
+  const button = el("button", { className: "linkish" }, marked ? "unmark resolution" : "mark as resolution");
+  button.onclick = async () => {
+    busy(true);
+    try {
+      await db.updatePost(root.id, { resolution_id: marked ? null : reply.id });
+      route(true);
+    } catch (error) {
+      notice(error.message, "error");
+    } finally {
+      busy(false);
+    }
+  };
+  return button;
+}
+
+/** Turns any post into a router by giving it a titled child. */
+function subThreadToggle(room, post, label) {
+  const slot = el("div", { className: "reply-slot" });
+  const button = el("button", { className: "linkish" }, label);
+  button.onclick = () => {
+    if (slot.firstChild) return slot.replaceChildren();
+    slot.replaceChildren(composer(room, post.id, "Create sub-thread", { withTitle: true }));
+  };
+  return el("div", {}, button, slot);
+}
+
+/** The sub-threads hanging off a reply, listed inline rather than on their own page. */
+async function renderChildThreads(room, tree, post, key, scoreBy, voteBy) {
+  const children = tree.split(post.id).subThreads;
+  if (!children.length) return el("span");
+  const list = el("ul", { className: "child-threads" });
+  for (const child of children) {
+    const title = (await decryptText(key, child.title_ct)) ?? "[cannot decrypt]";
+    list.append(el("li", {},
+      el("a", { href: `#/r/${room.slug}/t/${child.id}`, className: "thread-title" }, title),
+      el("span", { className: "meta" }, ` · ${describeCounts(tree.counts(child.id))}`)));
+  }
+  return list;
+}
+
 function replyToggle(room, parentId) {
   const slot = el("div", { className: "reply-slot" });
   const button = el("button", { className: "linkish" }, "reply");
@@ -632,13 +725,30 @@ async function renderInvites() {
   );
 
   const draw = async () => {
-    const rows = await db.myInvites();
-    list.replaceChildren(...rows.map((row) => el("li", {},
-      el("span", { className: "invite-label" }, row.label || "unlabelled"),
-      el("span", { className: "muted small" },
-        row.redeemed_at ? ` used ${ago(row.redeemed_at)}`
-          : new Date(row.expires_at) < new Date() ? " expired"
-          : ` open until ${new Date(row.expires_at).toLocaleDateString()}`))));
+    const rows = await db.myInviteRows();
+    list.replaceChildren(...rows.map((row) => {
+      const open = !row.redeemed_at && new Date(row.expires_at) > new Date();
+      const revoke = el("button", { className: "linkish" }, "revoke");
+      revoke.onclick = async () => {
+        busy(true);
+        try {
+          await db.revokeInvite(row.code_hash);
+          await draw();
+        } catch (error) {
+          notice(error.message, "error");
+        } finally {
+          busy(false);
+        }
+      };
+      return el("li", {},
+        el("span", { className: "invite-label" }, row.label || "unlabelled"),
+        el("span", { className: "muted small" },
+          row.redeemed_at ? ` used ${ago(row.redeemed_at)}`
+            : open ? ` open until ${new Date(row.expires_at).toLocaleDateString()}`
+            : " expired"),
+        // An invitation sent to the wrong place should die today, not in a fortnight.
+        open ? revoke : null);
+    }));
   };
 
   form.onsubmit = async (event) => {

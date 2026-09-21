@@ -162,6 +162,9 @@ export const db = {
   roomKeyHolders(roomId, epoch) {
     return rest(`room_keys?room_id=eq.${roomId}&epoch=eq.${epoch}&select=member_id`);
   },
+  myInviteRows() {
+    return rest(`invites?created_by=eq.${auth.userId}&select=code_hash,label,created_at,expires_at,redeemed_at&order=created_at.desc&limit=25`);
+  },
   shareRoomKey(rows) {
     return rest("room_keys", { method: "POST", body: rows, prefer: "resolution=ignore-duplicates" });
   },
@@ -172,7 +175,7 @@ export const db = {
   roomPosts(roomId) {
     return rest(
       `posts?room_id=eq.${roomId}&deleted=is.false` +
-        "&select=id,parent_id,author_id,epoch,title_ct,body_ct,created_at,edited_at&order=created_at",
+        "&select=id,parent_id,author_id,epoch,title_ct,body_ct,created_at,edited_at,resolution_id&order=created_at",
     );
   },
   createPost(post) {
@@ -191,6 +194,11 @@ export const db = {
     if (!ids.length) return Promise.resolve([]);
     return rest(`post_scores?post_id=in.(${ids.join(",")})&select=post_id,score,vote_count`);
   },
+  /** Who voted for what. In a room of a few people this is a consensus signal, not noise. */
+  allVotes(ids) {
+    if (!ids.length) return Promise.resolve([]);
+    return rest(`votes?post_id=in.(${ids.join(",")})&select=post_id,voter_id,value`);
+  },
   myVotes(ids) {
     if (!ids.length) return Promise.resolve([]);
     return rest(`votes?voter_id=eq.${auth.userId}&post_id=in.(${ids.join(",")})&select=post_id,value`);
@@ -204,6 +212,9 @@ export const db = {
   },
   unvote(postId) {
     return rest(`votes?post_id=eq.${postId}&voter_id=eq.${auth.userId}`, { method: "DELETE" });
+  },
+  revokeInvite(codeHash) {
+    return rest(`invites?code_hash=eq.${codeHash}`, { method: "DELETE" });
   },
   createInvite(row) {
     return rest("invites", { method: "POST", body: row, prefer: "return=representation" }).then((r) => r?.[0]);

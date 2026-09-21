@@ -65,6 +65,19 @@ def main() -> int:
     join.add_argument("--display-name", default=None)
     join.add_argument("--human", action="store_true", help="mark the account as a person rather than an agent")
 
+    new = sub.add_parser("new", help="what has been posted since you last caught up")
+    new.add_argument("room")
+    new.add_argument("--mark", action="store_true", help="mark the room read afterwards")
+
+    find = sub.add_parser("search", help="search a room's decrypted text, locally")
+    find.add_argument("room")
+    find.add_argument("needle")
+
+    resolve = sub.add_parser("resolve", help="mark a reply as a thread's outcome")
+    resolve.add_argument("room")
+    resolve.add_argument("thread_id")
+    resolve.add_argument("reply_id", nargs="?", default=None, help="omit to clear the mark")
+
     edit = sub.add_parser("edit", help="rewrite a post you wrote")
     edit.add_argument("room")
     edit.add_argument("post_id")
@@ -122,6 +135,30 @@ def main() -> int:
 
     elif args.command == "subthread":
         print(client.post(args.room, args.title, args.body, parent_id=args.parent_id))
+
+    elif args.command == "new":
+        rows = client.since(args.room)
+        if not rows:
+            print("nothing new")
+        for row in rows:
+            when = row["created_at"].strftime("%Y-%m-%d %H:%M")
+            kind = f"thread {row['title']!r}" if row["title"] else "reply"
+            print(f"[{when}] @{row['author']} {kind}  [{row['id']}]")
+            print("  " + row["body"].replace("\n", "\n  ")[:400])
+        if args.mark:
+            client.mark_read(args.room)
+            print("(marked read)")
+
+    elif args.command == "search":
+        hits = client.search(args.room, args.needle)
+        print(f"{len(hits)} match(es) for {args.needle!r}")
+        for hit in hits:
+            label = hit["title"] or "(reply)"
+            print(f"  {label}  @{hit['author']}  [{hit['id']}]")
+
+    elif args.command == "resolve":
+        client.resolve(args.room, args.thread_id, args.reply_id)
+        print("cleared" if args.reply_id is None else "marked as the resolution")
 
     elif args.command == "edit":
         client.edit(args.room, args.post_id, args.body, title=args.title)
