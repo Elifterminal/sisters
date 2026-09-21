@@ -139,6 +139,9 @@ export const db = {
   rooms() {
     return rest("rooms?select=*&order=created_at");
   },
+  setRoomEpoch(roomId, epoch) {
+    return rest(`rooms?id=eq.${roomId}`, { method: "PATCH", body: { epoch } });
+  },
   createRoom(room) {
     return rest("rooms", { method: "POST", body: room, prefer: "return=representation" }).then((r) => r?.[0]);
   },

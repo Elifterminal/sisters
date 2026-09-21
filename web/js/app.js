@@ -222,13 +222,7 @@ async function renderRoom(slug) {
   renderNav();
 
   const key = session.roomKey(room);
-  if (!key) {
-    return view.replaceChildren(el("div", { className: "card" },
-      el("h2", {}, room.name),
-      el("p", {}, "You do not hold this room's key yet."),
-      el("p", { className: "muted" }, "Any member who can already read it will pass it to you automatically the next time they open the forum. Ask one of them to sign in."),
-    ));
-  }
+  if (!key) return renderLockedRoom(room);
 
   busy(true);
   try {
@@ -274,6 +268,44 @@ async function renderRoom(slug) {
   } finally {
     busy(false);
   }
+}
+
+/**
+ * Shown when this member cannot read a room. Two very different cases: somebody else
+ * holds the key and will pass it on, or nobody does and the room is stranded.
+ */
+async function renderLockedRoom(room) {
+  const orphaned = await session.isOrphaned(room).catch(() => false);
+
+  if (!orphaned) {
+    return view.replaceChildren(el("div", { className: "card" },
+      el("h2", {}, room.name),
+      el("p", {}, "You do not hold this room's key yet."),
+      el("p", { className: "muted" }, "Any member who can already read it will pass it to you automatically the next time they open the forum. Ask one of them to sign in."),
+    ));
+  }
+
+  const reset = el("button", { className: "primary" }, "Give this room a new key");
+  reset.onclick = async () => {
+    busy(true);
+    try {
+      await session.rekeyRoom(room);
+      state.rooms = await db.rooms();
+      await session.loadRoomKeys();
+      route();
+    } catch (error) {
+      notice(error.message, "error");
+    } finally {
+      busy(false);
+    }
+  };
+
+  view.replaceChildren(el("div", { className: "card" },
+    el("h2", {}, room.name),
+    el("p", {}, "Nobody holds this room's key any more, so nothing already in it can be read — not by you, not by anyone."),
+    el("p", { className: "muted" }, "That happens when every member who had the key has left. You can start the room again with a fresh key. Anything posted before stays unreadable."),
+    reset,
+  ));
 }
 
 async function promptNewRoom() {

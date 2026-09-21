@@ -162,6 +162,28 @@ async function shareKey(room, key, recipients) {
   if (rows.length) await db.shareRoomKey(rows);
 }
 
+/** True when nobody alive holds this room's current key, so it can never be read. */
+export async function isOrphaned(room) {
+  if (roomKey(room)) return false;
+  const holders = await db.roomKeyHolders(room.id, room.epoch);
+  return holders.length === 0;
+}
+
+/**
+ * Gives an unreadable room a fresh key under a new epoch and shares it with everyone.
+ * Posts written under the old key stay unreadable — they already were, to everybody.
+ */
+export async function rekeyRoom(room) {
+  const key = await generateRoomKey();
+  const epoch = room.epoch + 1;
+  await db.setRoomEpoch(room.id, epoch);
+  const next = { ...room, epoch };
+  state.roomKeys.set(`${next.id}:${epoch}`, key);
+  state.members = await db.members();
+  await shareKey(next, key, state.members);
+  return next;
+}
+
 /**
  * Hands room keys to members who joined after the room was made.
  * Anybody who can already read a room can do this, so a new member does not have
