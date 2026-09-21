@@ -1,0 +1,168 @@
+/* Sister Chat — plain, dense, link-forward. Closer to a message board than an app. */
+
+:root {
+  --bg: #0f1115;
+  --panel: #161b22;
+  --line: #262d36;
+  --text: #dbe2ea;
+  --muted: #8b97a6;
+  --accent: #d9a441;
+  --accent-dim: #8a6a2a;
+  --danger: #e06c60;
+  --radius: 6px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding-bottom: 4rem;
+}
+
+body.busy { cursor: progress; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------------------------------------------------------------- nav */
+
+#nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: .75rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand { font-weight: 700; color: var(--text); letter-spacing: .04em; }
+.rooms { display: flex; gap: .75rem; flex-wrap: wrap; }
+.room-link { color: var(--muted); }
+.room-link.current { color: var(--accent); }
+.room-link.locked::after { content: " 🔒"; font-size: .8em; }
+.spacer { flex: 1; }
+.whoami { color: var(--muted); }
+.nav-action { color: var(--text); }
+
+/* ---------------------------------------------------------------- layout */
+
+main { max-width: 52rem; margin: 0 auto; padding: 1.5rem 1rem; }
+
+h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
+
+.muted { color: var(--muted); }
+.small { font-size: .85em; }
+.center { text-align: center; }
+.hint { color: var(--muted); font-size: .8rem; margin: -.4rem 0 .8rem; }
+
+.notice { margin: 0; padding: 0; }
+.notice.error, .notice.info {
+  margin: .75rem auto;
+  max-width: 52rem;
+  padding: .6rem .9rem;
+  border-radius: var(--radius);
+  background: #2a1f1f;
+  border: 1px solid var(--danger);
+  color: #f0c4bf;
+}
+.notice.info { background: #16212a; border-color: var(--line); color: var(--muted); }
+
+footer {
+  max-width: 52rem;
+  margin: 2rem auto 0;
+  padding: 1rem;
+  color: var(--muted);
+  font-size: .8rem;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------------------------------------------------------------- cards + forms */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+.card.narrow { max-width: 26rem; margin: 3rem auto; }
+
+label { display: block; margin: .9rem 0 .35rem; color: var(--muted); font-size: .85rem; }
+label.checkline { display: flex; align-items: center; gap: .5rem; color: var(--text); }
+
+input, textarea {
+  width: 100%;
+  padding: .55rem .7rem;
+  background: #0c0f13;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+}
+input[type="checkbox"] { width: auto; }
+input:focus, textarea:focus { outline: 2px solid var(--accent-dim); border-color: var(--accent-dim); }
+textarea { resize: vertical; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: #1d242d;
+  color: var(--text);
+  padding: .5rem .9rem;
+}
+button:hover { border-color: var(--accent-dim); }
+button.primary { background: var(--accent); color: #17130a; border-color: var(--accent); font-weight: 700; }
+button.linkish { background: none; border: none; color: var(--muted); padding: .2rem 0; }
+button.linkish:hover { color: var(--accent); text-decoration: underline; }
+
+.composer { margin: 1rem 0 1.5rem; display: grid; gap: .5rem; }
+.composer button { justify-self: start; }
+
+/* ---------------------------------------------------------------- threads */
+
+.room-header { margin-bottom: 1rem; }
+
+.threads { list-style: none; margin: 0; padding: 0; }
+.thread, .reply, .thread-view { display: flex; gap: .75rem; }
+.thread { padding: .6rem 0; border-bottom: 1px solid var(--line); }
+.thread-title { font-size: 1.02rem; color: var(--text); }
+.thread-title:hover { color: var(--accent); }
+.thread-main, .reply-main { flex: 1; min-width: 0; }
+.meta { color: var(--muted); font-size: .8rem; margin-top: .2rem; }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .4rem 0; }
+
+.votes { display: flex; flex-direction: column; align-items: center; width: 2rem; color: var(--muted); }
+.vote { background: none; border: none; color: var(--muted); padding: 0; line-height: 1; font-size: .9rem; }
+.vote:hover { color: var(--accent); }
+.vote.on { color: var(--accent); }
+.score { font-size: .9rem; }
+
+.thread-view { margin: 1rem 0 1.5rem; }
+
+.replies { list-style: none; margin: 0; padding: 0 0 0 1rem; border-left: 1px solid var(--line); }
+.replies.depth-0 { padding-left: 0; border-left: none; }
+.reply { padding: .5rem 0; }
+.reply-slot:not(:empty) { margin-top: .5rem; }
+
+.room-tools { margin-top: 1.5rem; }
+.back { display: inline-block; margin-bottom: 1rem; color: var(--muted); }
+
+/* ---------------------------------------------------------------- invites */
+
+.invites { list-style: none; padding: 0; }
+.invites li { padding: .4rem 0; border-bottom: 1px solid var(--line); display: flex; gap: .5rem; }
+.invite-label { color: var(--text); }
+.invite-new { margin: 1rem 0; padding: 1rem; border: 1px solid var(--accent-dim); border-radius: var(--radius); background: #1a1710; }
+.invite-new textarea { margin-top: .5rem; }
+
+@media (max-width: 480px) {
+  #nav { gap: .5rem; }
+  .whoami { display: none; }
+}
