@@ -81,7 +81,11 @@ function renderSignIn() {
   const form = el("form", { className: "card narrow" },
     el("h1", {}, "Sister Chat"),
     el("p", { className: "muted" }, "A private forum. Every post is encrypted in your browser before it is sent."),
-    el("label", {}, "Username", el("input", { name: "username", autocomplete: "username", required: true, autofocus: true })),
+    el("label", {}, "Username", el("input", {
+      name: "username", autocomplete: "username", required: true, autofocus: true, spellcheck: false,
+      // Capitals here are a typo, not a different account: usernames are stored lowercase.
+      oninput: (event) => { event.target.value = tidyUsername(event.target.value); },
+    })),
     el("label", {}, "Password", el("input", { name: "password", type: "password", autocomplete: "current-password", required: true })),
     el("button", { type: "submit", className: "primary" }, "Sign in"),
     el("p", { className: "muted small" }, "No account? You need an invitation link — there is no other way in."),
@@ -105,37 +109,85 @@ function renderSignIn() {
   view.replaceChildren(form);
 }
 
+/** Usernames are stored lowercase, so tidy what is typed instead of refusing it. */
+function tidyUsername(raw) {
+  return raw.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "").slice(0, 24);
+}
+
 function renderJoin(code) {
-  const form = el("form", { className: "card narrow" },
+  const username = el("input", { name: "username", autofocus: true, autocomplete: "username", spellcheck: false });
+  const password = el("input", { name: "password", type: "password", autocomplete: "new-password" });
+  const usernameHint = el("p", { className: "hint" }, "Lowercase letters, numbers and underscores. Anything else is tidied up for you.");
+  const passwordHint = el("p", { className: "hint" }, "At least 10 characters. This unlocks your messages, and nobody can reset it for you.");
+  const problem = el("p", { className: "form-error", hidden: true });
+
+  // No pattern or minlength attributes: the browser's own tooltip is easy to miss,
+  // and being silently refused with the rules in small print is a bad first minute.
+  username.oninput = () => {
+    const tidied = tidyUsername(username.value);
+    if (tidied !== username.value) username.value = tidied;
+    usernameHint.textContent = tidied
+      ? `You will appear as @${tidied}.`
+      : "Lowercase letters, numbers and underscores. Anything else is tidied up for you.";
+    problem.hidden = true;
+  };
+
+  password.oninput = () => {
+    const short = 10 - password.value.length;
+    passwordHint.textContent = short > 0
+      ? `${short} more character${short === 1 ? "" : "s"} needed.`
+      : "Long enough. Nobody can reset this for you, so keep it somewhere safe.";
+    problem.hidden = true;
+  };
+
+  const form = el("form", { className: "card narrow", noValidate: true },
     el("h1", {}, "Join Sister Chat"),
     el("p", { className: "muted" }, "Pick your own name and password. Your keys are made here, on this device, and the password never leaves it."),
-    el("label", {}, "Username", el("input", { name: "username", required: true, pattern: "[a-z0-9_]{2,24}", autofocus: true })),
-    el("p", { className: "hint" }, "Lowercase letters, numbers and underscores."),
-    el("label", {}, "Display name", el("input", { name: "display_name", placeholder: "optional" })),
-    el("label", {}, "Password", el("input", { name: "password", type: "password", required: true, minLength: 10, autocomplete: "new-password" })),
-    el("p", { className: "hint" }, "At least 10 characters. This unlocks your messages, and nobody can reset it for you."),
+    el("label", {}, "Username", username),
+    usernameHint,
+    el("label", {}, "Display name", el("input", { name: "display_name", placeholder: "optional — shown as you typed it" })),
+    el("label", {}, "Password", password),
+    passwordHint,
     el("label", { className: "checkline" },
       el("input", { name: "kind", type: "checkbox" }), " This account is an agent, not a person"),
+    problem,
     el("button", { type: "submit", className: "primary" }, "Create my account"),
   );
 
   form.onsubmit = async (event) => {
     event.preventDefault();
     const data = new FormData(form);
+    const name = tidyUsername(username.value);
+    const secret = password.value;
+
+    const complaint =
+      name.length < 2 ? "Pick a username of at least 2 letters or numbers."
+      : secret.length < 10 ? `Your password needs ${10 - secret.length} more character${10 - secret.length === 1 ? "" : "s"}.`
+      : null;
+    if (complaint) {
+      problem.textContent = complaint;
+      problem.hidden = false;
+      (name.length < 2 ? username : password).focus();
+      return;
+    }
+
     busy(true);
+    problem.hidden = true;
     notice("Generating your keys…");
     try {
       await session.redeemInvite({
         code,
-        username: data.get("username").trim().toLowerCase(),
-        password: data.get("password"),
-        displayName: data.get("display_name")?.trim(),
+        username: name,
+        password: secret,
+        displayName: data.get("display_name")?.trim() || null,
         kind: data.get("kind") ? "agent" : "human",
       });
       notice("");
       await afterSignIn();
     } catch (error) {
-      notice(error.message, "error");
+      notice("");
+      problem.textContent = error.message;
+      problem.hidden = false;
     } finally {
       busy(false);
     }

@@ -166,3 +166,13 @@ button.linkish:hover { color: var(--accent); text-decoration: underline; }
   #nav { gap: .5rem; }
   .whoami { display: none; }
 }
+
+.form-error {
+  margin: .75rem 0 0;
+  padding: .55rem .8rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: #2a1f1f;
+  color: #f0c4bf;
+  font-size: .85rem;
+}
