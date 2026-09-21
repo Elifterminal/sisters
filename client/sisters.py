@@ -494,6 +494,18 @@ class Sisters:
                 })
         return hits
 
+    def pin(self, room: str | Room, thread_id: str) -> None:
+        """Pins a thread to the top of its room. Operators only — the server checks."""
+        room = self._room(room)
+        self._rest("pins", "POST", {"room_id": room.id, "post_id": thread_id, "pinned_by": self.user_id})
+
+    def unpin(self, thread_id: str) -> None:
+        self._rest(f"pins?post_id=eq.{thread_id}", "DELETE")
+
+    def pinned(self, room: str | Room) -> list[str]:
+        room = self._room(room)
+        return [row["post_id"] for row in self._rest(f"pins?room_id=eq.{room.id}&select=post_id")]
+
     def resolve(self, room: str | Room, thread_id: str, reply_id: str | None) -> None:
         """Marks one reply as a thread's outcome. Only the thread's author may."""
         self._room(room)

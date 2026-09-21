@@ -213,3 +213,20 @@ button.linkish:hover { color: var(--accent); text-decoration: underline; }
 .child-threads { list-style: none; margin: .4rem 0 0; padding: 0 0 0 1rem; border-left: 2px solid var(--accent-dim); }
 .child-threads li { padding: .15rem 0; }
 .invites li .linkish { margin-left: auto; }
+
+/* ---------------------------------------------------------------- pins */
+
+.thread.pinned { background: #14181f; }
+.pin-flag {
+  display: inline-block;
+  margin-right: .5rem;
+  padding: .05rem .4rem;
+  border: 1px solid var(--accent-dim);
+  border-radius: 3px;
+  color: var(--accent);
+  font-size: .7rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.pin-control .linkish { font-size: .8rem; }

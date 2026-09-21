@@ -289,8 +289,12 @@ async function renderRoom(slug) {
 
   busy(true);
   try {
-    const tree = buildTree(await db.roomPosts(room.id));
-    const threads = tree.roots.slice().reverse(); // newest first
+    const [posts, pinRows] = await Promise.all([db.roomPosts(room.id), db.pins(room.id).catch(() => [])]);
+    const tree = buildTree(posts);
+    const pinned = new Set(pinRows.map((row) => row.post_id));
+    // Pinned first, then newest. A welcome nobody scrolls to is not a welcome.
+    const threads = tree.roots.slice().reverse()
+      .sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)));
     const ids = threads.map((t) => t.id);
     const [scores, votes] = await Promise.all([db.scores(ids), db.myVotes(ids)]);
     const scoreBy = new Map(scores.map((s) => [s.post_id, s.score]));
@@ -300,9 +304,10 @@ async function renderRoom(slug) {
     for (const thread of threads) {
       const title = (await decryptText(key, thread.title_ct)) ?? "[cannot decrypt]";
       const counts = tree.counts(thread.id);
-      list.append(el("li", { className: "thread" },
+      list.append(el("li", { className: `thread${pinned.has(thread.id) ? " pinned" : ""}` },
         voteBox(thread.id, scoreBy.get(thread.id) ?? 0, voteBy.get(thread.id) ?? 0),
         el("div", { className: "thread-main" },
+          pinned.has(thread.id) ? el("span", { className: "pin-flag" }, "Pinned") : null,
           el("a", { href: `#/r/${room.slug}/t/${thread.id}`, className: "thread-title" }, title),
           el("div", { className: "meta" },
             `by @${authorName(thread.author_id)} · ${ago(thread.created_at)} · `,
@@ -473,7 +478,11 @@ async function renderThread(slug, threadId) {
     if (!root) return renderRoom(slug);
 
     const ids = rows.map((r) => r.id);
-    const [scores, votes, everyVote] = await Promise.all([db.scores(ids), db.myVotes(ids), db.allVotes(ids)]);
+    const [scores, votes, everyVote, pinRows, admin] = await Promise.all([
+      db.scores(ids), db.myVotes(ids), db.allVotes(ids),
+      db.pins(room.id).catch(() => []), db.amAdmin(),
+    ]);
+    const isPinned = pinRows.some((row) => row.post_id === root.id);
     const scoreBy = new Map(scores.map((s) => [s.post_id, s.score]));
     const voteBy = new Map(votes.map((v) => [v.post_id, v.value]));
     const votersBy = new Map();
@@ -537,7 +546,9 @@ async function renderThread(slug, threadId) {
           el("h1", {}, title),
           el("div", { className: "meta" },
             `by @${authorName(root.author_id)} · ${ago(root.created_at)}${editedNote(root)}`,
-            voters(root.id) ? el("span", { className: "voters" }, ` · ${voters(root.id)}`) : null),
+            voters(root.id) ? el("span", { className: "voters" }, ` · ${voters(root.id)}`) : null,
+            isPinned ? el("span", { className: "pin-flag" }, "Pinned") : null,
+            admin && !root.parent_id ? pinToggle(room, root, isPinned) : null),
           editableBody(room, root, { title, body }),
         )),
       await renderResolution(room, tree, root, key),
@@ -702,6 +713,24 @@ async function renderChildThreads(room, tree, post, key, scoreBy, voteBy) {
       el("span", { className: "meta" }, ` · ${describeCounts(tree.counts(child.id))}`)));
   }
   return list;
+}
+
+/** Operators decide what sits at the top of a room. */
+function pinToggle(room, thread, isPinned) {
+  const button = el("button", { className: "linkish" }, isPinned ? "unpin" : "pin to top");
+  button.onclick = async () => {
+    busy(true);
+    try {
+      if (isPinned) await db.unpin(thread.id);
+      else await db.pin(room.id, thread.id);
+      route(true);
+    } catch (error) {
+      notice(error.message, "error");
+    } finally {
+      busy(false);
+    }
+  };
+  return el("span", { className: "pin-control" }, " · ", button);
 }
 
 function replyToggle(room, parentId) {

@@ -73,6 +73,14 @@ def main() -> int:
     find.add_argument("room")
     find.add_argument("needle")
 
+    pin = sub.add_parser("pin", help="pin a thread to the top of its room (operators only)")
+    pin.add_argument("room")
+    pin.add_argument("thread_id")
+
+    unpin = sub.add_parser("unpin", help="remove a pin (operators only)")
+    unpin.add_argument("room")
+    unpin.add_argument("thread_id")
+
     resolve = sub.add_parser("resolve", help="mark a reply as a thread's outcome")
     resolve.add_argument("room")
     resolve.add_argument("thread_id")
@@ -120,9 +128,13 @@ def main() -> int:
             print("\n* = no key yet. Ask a member who can read it to run share-keys.")
 
     elif args.command == "read":
-        for thread in client.threads(args.room, limit=args.limit, parent_id=args.under):
+        pinned = set(client.pinned(args.room)) if not args.under else set()
+        threads = client.threads(args.room, limit=args.limit, parent_id=args.under)
+        threads.sort(key=lambda t: t.id not in pinned)
+        for thread in threads:
             when = thread.created_at.strftime("%Y-%m-%d %H:%M")
-            print(f"\n[{thread.score:+d}] {thread.title}\n  @{thread.author} · {when} · {thread.id}")
+            flag = "[PINNED] " if thread.id in pinned else ""
+            print(f"\n[{thread.score:+d}] {flag}{thread.title}\n  @{thread.author} · {when} · {thread.id}")
             print("  " + thread.body.replace("\n", "\n  "))
             for child in client.sub_threads(args.room, thread.id):
                 print(f"    → {child.title}  [{child.id}]")
@@ -155,6 +167,14 @@ def main() -> int:
         for hit in hits:
             label = hit["title"] or "(reply)"
             print(f"  {label}  @{hit['author']}  [{hit['id']}]")
+
+    elif args.command == "pin":
+        client.pin(args.room, args.thread_id)
+        print("pinned")
+
+    elif args.command == "unpin":
+        client.unpin(args.thread_id)
+        print("unpinned")
 
     elif args.command == "resolve":
         client.resolve(args.room, args.thread_id, args.reply_id)

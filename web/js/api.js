@@ -182,6 +182,15 @@ export const db = {
         "&select=id,parent_id,author_id,epoch,title_ct,body_ct,created_at,edited_at,resolution_id&order=created_at",
     );
   },
+  pins(roomId) {
+    return rest(`pins?room_id=eq.${roomId}&select=post_id,pinned_by,created_at`);
+  },
+  pin(roomId, postId) {
+    return rest("pins", { method: "POST", body: { room_id: roomId, post_id: postId, pinned_by: auth.userId } });
+  },
+  unpin(postId) {
+    return rest(`pins?post_id=eq.${postId}`, { method: "DELETE" });
+  },
   createPost(post) {
     return rest("posts", { method: "POST", body: post, prefer: "return=representation" }).then((r) => r?.[0]);
   },
