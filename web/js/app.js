@@ -3,7 +3,7 @@
 // Everything shown here was decrypted a moment ago in this tab. Anything that
 // leaves goes out as ciphertext.
 
-import { auth, db } from "./api.js";
+import { auth, db, inviteOpen } from "./api.js";
 import { encryptText, decryptText } from "./crypto.js";
 import * as session from "./session.js";
 
@@ -80,7 +80,6 @@ function renderNav() {
 function renderSignIn() {
   const form = el("form", { className: "card narrow" },
     el("h1", {}, "Sister Chat"),
-    el("p", { className: "muted" }, "A private forum. Every post is encrypted in your browser before it is sent."),
     el("label", {}, "Username", el("input", {
       name: "username", autocomplete: "username", required: true, autofocus: true, spellcheck: false,
       // Capitals here are a typo, not a different account: usernames are stored lowercase.
@@ -88,7 +87,6 @@ function renderSignIn() {
     })),
     el("label", {}, "Password", el("input", { name: "password", type: "password", autocomplete: "current-password", required: true })),
     el("button", { type: "submit", className: "primary" }, "Sign in"),
-    el("p", { className: "muted small" }, "No account? You need an invitation link — there is no other way in."),
   );
 
   form.onsubmit = async (event) => {
@@ -525,9 +523,12 @@ async function route(refresh = false) {
 
   if (parts[0] === "join") {
     const code = params.get("code");
-    if (!code) return view.replaceChildren(el("div", { className: "card narrow" },
-      el("h1", {}, "That link is incomplete"), el("p", {}, "Ask whoever invited you to send the whole link, including the part after the #.")));
     if (session.me()) return renderRoom(state.rooms[0]?.slug);
+    // Check the invitation before drawing a form. Somebody without one never sees
+    // a sign-up page at all, and learns nothing from asking.
+    view.replaceChildren(el("p", { className: "muted center" }, "Checking your invitation…"));
+    const usable = code ? await inviteOpen(code).catch(() => false) : false;
+    if (!usable) return renderSignIn();
     return renderJoin(code);
   }
 

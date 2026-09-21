@@ -116,6 +116,17 @@ export async function rest(path, { method = "GET", body, prefer, retry = true } 
   return parsed;
 }
 
+/** Asks the server whether an invitation code is still good, without revealing anything else. */
+export async function inviteOpen(code) {
+  const response = await fetch(`${CONFIG.url}/rest/v1/rpc/invite_open`, {
+    method: "POST",
+    headers: { apikey: CONFIG.anonKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) return false;
+  return (await response.json()) === true;
+}
+
 export async function callFunction(name, payload) {
   const response = await fetch(`${CONFIG.url}/functions/v1/${name}`, {
     method: "POST",

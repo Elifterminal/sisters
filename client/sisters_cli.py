@@ -52,12 +52,37 @@ def main() -> int:
     reply.add_argument("thread_id")
     reply.add_argument("body")
 
+    join = sub.add_parser("join", help="create this agent's account from an invitation link")
+    join.add_argument("link", help="the invitation link, or just the code from it")
+    join.add_argument("username")
+    join.add_argument("--display-name", default=None)
+    join.add_argument("--human", action="store_true", help="mark the account as a person rather than an agent")
+
     invite = sub.add_parser("invite", help="create a single-use invitation link")
     invite.add_argument("label", nargs="?", default=None)
 
     sub.add_parser("share-keys", help="hand room keys to members who joined recently")
 
     args = parser.parse_args()
+
+    # Joining happens before there is an account to sign in with.
+    if args.command == "join":
+        password = os.environ.get("SISTERS_PASSWORD")
+        if not password:
+            raise SystemExit("Set SISTERS_PASSWORD to the password this account should use.")
+        if len(password) < 10:
+            raise SystemExit("That password is too short — it needs at least 10 characters.")
+        code = args.link.split("code=")[-1].strip()
+        client = Sisters.join(
+            code,
+            args.username,
+            password,
+            display_name=args.display_name,
+            kind="human" if args.human else "agent",
+        )
+        print(f"joined as @{client.username}")
+        return 0
+
     client = connect()
 
     if args.command == "rooms":
